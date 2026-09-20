@@ -7,6 +7,70 @@
 // Everything below is the query UI, which now lives in the header and has to
 // work on the header's green gradient.
 
+// ------------------------------------------------------------------ loading
+
+// Covers everything until the graph has arrived. Same gradient as the header,
+// so handing over to the real page is not a visible jump.
+#loading {
+  position: fixed;
+  z-index: 100;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  text-align: center;
+  background-color: #159957;
+  background-image: linear-gradient(120deg, #155799, #159957);
+
+  p {
+    margin: 1.1rem 0 0;
+    font-size: 0.95rem;
+    opacity: 0.9;
+  }
+}
+
+// The class is on <html> in the markup and app.js takes it off, so this is the
+// only thing standing between the spinner and a page that never finishes.
+html:not(.is-loading) #loading {
+  display: none;
+}
+
+html.is-loading,
+html.is-loading body {
+  // There is nothing to scroll to yet, and scrolling behind the overlay only
+  // slides the page around under the spinner.
+  overflow: hidden;
+}
+
+// Twelve spokes of graded opacity, stepped rather than eased, which is what
+// makes it read as the iOS one. The rotation goes on the element itself
+// because transform-origin on inner SVG nodes is not dependable across
+// browsers.
+.spinner {
+  width: 2.5rem;
+  height: 2.5rem;
+  transform-origin: center;
+  animation: spin 1s steps(12, end) infinite;
+
+  rect {
+    fill: currentColor;
+  }
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation-duration: 3s;
+  }
+}
+
 .page-header {
   // The heading, the mapset count, the subtitle and the input sit together in
   // the middle of the first screen. Everything below starts past the fold,
@@ -360,6 +424,14 @@
   margin-top: 0;
   font-size: 0.85rem;
   color: #000;
+
+  p {
+    margin: 0 0 0.35rem;
+  }
+
+  p:last-child {
+    margin-bottom: 0;
+  }
 }
 
 .site-footer-owner {

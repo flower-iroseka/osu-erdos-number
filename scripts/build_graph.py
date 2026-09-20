@@ -420,6 +420,15 @@ def main() -> int:
     meta = {
         "generated": graph["generated"],
         "modes": DISPLAY_MODES,
+        # The shape of this build, so the workflow can compare it with the last
+        # one before publishing. A run that collects a fraction of what it
+        # should still succeeds and still force-pushes, and nothing on the site
+        # would look wrong.
+        "counts": {
+            "mappers": len(ordered),
+            "sets": len(sets),
+            "edges": len(edges),
+        },
         "top": [
             {
                 "mode": DISPLAY_MODES[mode],

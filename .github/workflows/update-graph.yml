@@ -71,9 +71,11 @@ jobs:
           fi
 
           git fetch --depth=1 origin data
-          for file in beatsets.json users.json; do
-            # users.json carries names for people who may have since renamed or
-            # been banned, so it is kept alongside the store rather than rebuilt.
+          # users.json carries names for people who may have since renamed or
+          # been banned, so it is kept alongside the store rather than rebuilt.
+          # meta.json is pulled only so the check further down can compare this
+          # build with the one on the branch.
+          for file in beatsets.json users.json meta.json; do
             if git cat-file -e "FETCH_HEAD:$file" 2>/dev/null; then
               git show "FETCH_HEAD:$file" > "data/$file"
               echo "restored data/$file ($(wc -c < "data/$file") bytes)"
@@ -135,6 +137,58 @@ jobs:
           for name in ("graph.json", "meta.json"):
               path = Path("out") / name
               print(f"{name}: {path.stat().st_size / 1e6:.2f} MB")
+          PY
+
+      # The publish step below replaces the data branch outright, so a build
+      # that came out badly would go live with nothing to catch it: the job
+      # would succeed, the site would keep working, and the only sign would be
+      # numbers that are wrong. This is the one place that can notice.
+      - name: Check the build against the last one
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          new = json.loads(Path("out/meta.json").read_text(encoding="utf-8"))["counts"]
+          print(f"this run: {new['sets']} beatmapsets, {new['mappers']} mappers, "
+                f"{new['edges']} edges")
+
+          previous = Path("data/meta.json")
+          if not previous.is_file():
+              print("no meta.json on the data branch yet, nothing to compare")
+              raise SystemExit(0)
+
+          old = json.loads(previous.read_text(encoding="utf-8")).get("counts")
+          if not old:
+              print("the meta.json on the branch predates this check, nothing to compare")
+              raise SystemExit(0)
+
+          print(f"last run: {old['sets']} beatmapsets, {old['mappers']} mappers, "
+                f"{old['edges']} edges")
+
+          # Incremental runs only ever add. A full run rebuilds the store from
+          # scratch, so it can lose sets that were unranked or deleted in the
+          # meantime -- but half a year of that is nowhere near five percent.
+          TOLERANCE = 0.95
+          problems = []
+
+          if new["sets"] == 0:
+              problems.append("collected no beatmapsets at all")
+
+          for key in ("sets", "mappers"):
+              if old[key] and new[key] < old[key] * TOLERANCE:
+                  drop = 100 * (1 - new[key] / old[key])
+                  problems.append(f"{key} fell from {old[key]} to {new[key]} ({drop:.1f}% down)")
+
+          for line in problems:
+              print(f"::error::{line}")
+
+          if problems:
+              print("not publishing: the store or the collector needs looking at first")
+              raise SystemExit(1)
+
+          print(f"within {TOLERANCE:.0%} of the last run")
           PY
 
       - uses: actions/upload-artifact@v7

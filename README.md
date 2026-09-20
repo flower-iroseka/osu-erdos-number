@@ -85,7 +85,20 @@ has already stored, which is what the monthly run does. `build_graph.py` writes 
 
 A full collection is about 1100 requests and 14 minutes.
 
+## Licence
+
+The code here — the scripts, the page, the stylesheet, the workflow — is
+[MIT licensed](LICENSE). Copyright &copy; 2026 flower-iroseka.
+
+**The data is not covered by that licence.** It comes from the
+[osu! API v2](https://osu.ppy.sh/docs/index.html) and belongs to
+[ppy Pty Ltd](https://ppy.sh/), used under their terms of use. The beatmapsets
+themselves belong to the mappers who made them, and the names in
+`users.csv` and the graph are theirs.
+
 ## Credits
 
-Data from the [osu! API v2](https://osu.ppy.sh/docs/index.html). Site built on the
-Cayman theme via `jekyll-remote-theme`.
+The idea came from an [X post by @_StanMa](https://x.com/_StanMa/status/2100676388475007390)
+(Mafumafu, on the osu! Nomination Assessment Team).
+
+Site built on the Cayman theme via `jekyll-remote-theme`.

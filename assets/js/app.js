@@ -43,7 +43,8 @@
     note: document.getElementById("top-note"),
     result: document.getElementById("result"),
     paths: document.getElementById("paths"),
-    status: document.getElementById("status")
+    status: document.getElementById("status"),
+    dataDate: document.getElementById("data-date")
   };
 
   // The two explain buttons and the boxes they open, as [button, box] id pairs.
@@ -75,6 +76,26 @@
       }
       return response.json();
     });
+  }
+
+  /* Take the loading cover off. Called once the graph has either arrived or
+   * failed; there is nothing useful to wait for after that. */
+  function ready() {
+    document.documentElement.classList.remove("is-loading");
+  }
+
+  /* Say when the data was collected. It only changes once a month, so a date
+   * that has stopped moving is the one visible sign that the scheduled job has
+   * been failing -- which is otherwise silent, because the page keeps serving
+   * the last good graph. */
+  function showGenerated(iso) {
+    if (!iso || !els.dataDate) {
+      return;
+    }
+    var days = (Date.now() - Date.parse(iso)) / 86400000;
+    els.dataDate.textContent =
+      "Data updated " + iso.slice(0, 10) + (days > 40 ? " (older than usual)" : "") + " · ";
+    els.dataDate.hidden = false;
   }
 
   /* Copy what we need out of the parsed JSON and let the rest be collected.
@@ -346,6 +367,19 @@
     row.style.paddingBottom = tallest ? tallest + 8 + "px" : "";
   }
 
+  /* A mapper's name, linking to their osu! profile. Every name on the page is
+   * one of these: seeing a name and wanting to know who it is are the same
+   * thought. Opens in a new tab, like the beatmapset links. */
+  function nameLink(index) {
+    var link = document.createElement("a");
+    link.className = "mapper-link";
+    link.href = "https://osu.ppy.sh/users/" + graph.ids[index];
+    link.target = "_blank";
+    link.rel = "noopener";
+    link.textContent = graph.names[index];
+    return link;
+  }
+
   function pathRow(path) {
     var row = document.createElement("div");
     row.className = "path-row";
@@ -354,10 +388,7 @@
       if (i > 0) {
         row.appendChild(arrow(path[i - 1], node));
       }
-      var name = document.createElement("span");
-      name.className = "path-name";
-      name.textContent = graph.names[node];
-      row.appendChild(name);
+      row.appendChild(nameLink(node));
     });
 
     return row;
@@ -420,8 +451,14 @@
       return;
     }
 
-    els.result.textContent =
-      graph.names[source] + "'s " + topName + " number is: " + steps;
+    // Built from nodes rather than one string so both names can be links. The
+    // text still reads as one sentence to a screen reader.
+    els.result.replaceChildren(
+      nameLink(source),
+      document.createTextNode("'s "),
+      nameLink(target),
+      document.createTextNode(" number is: " + steps)
+    );
 
     var found = shortPaths(source, target, dist);
     found.paths.forEach(function (path) {
@@ -491,19 +528,64 @@
       ".";
   }
 
+  /* The name in the heading, for whichever mode is selected.
+   *
+   * Two sources on purpose: meta.json is small and lands first, and carries the
+   * top mapper's name, but only the graph carries everybody's. Whichever has
+   * arrived is used. Both callers go through here -- if the meta handler wrote
+   * the heading itself it would overwrite the mode from a deep link, because
+   * meta.json and the graph land in either order. */
+  function updateTopName() {
+    var index = graph.top[graph.mode];
+    if (graph.names.length && index >= 0) {
+      els.topName.textContent = graph.names[index] || "…";
+      return;
+    }
+    var entry = graph.metaTop ? graph.metaTop[graph.mode] : null;
+    els.topName.textContent = (entry && entry.username) || "…";
+  }
+
   function selectMode(index) {
     graph.mode = index;
-    els.topName.textContent = graph.names[graph.top[index]] || "…";
+    updateTopName();
     els.modeIcon.replaceChildren(modeMark(graph.modes[index]));
     updateNote();
-    Array.prototype.forEach.call(els.modeMenu.children, function (item, i) {
-      item.firstChild.setAttribute("aria-selected", String(i === index));
+    optionButtons().forEach(function (button, i) {
+      button.setAttribute("aria-selected", String(i === index));
     });
     closeMenu();
+    updateUrl();
     // Each mode has its own top mapper, so the last query has a new answer.
     if (els.input.value.trim()) {
       run(els.input.value);
     }
+  }
+
+  function optionButtons() {
+    return Array.prototype.map.call(els.modeMenu.children, function (item) {
+      return item.firstChild;
+    });
+  }
+
+  /* Move focus up and down the options, wrapping at both ends. The options are
+   * taken out of the tab order and driven from here, which is what a listbox
+   * is expected to do. */
+  function stepOption(at, delta) {
+    var options = optionButtons();
+    if (!options.length) {
+      return;
+    }
+    var next = options[(at + delta + options.length) % options.length];
+    if (next) {
+      next.focus();
+    }
+  }
+
+  function openMenu() {
+    els.modeMenu.hidden = false;
+    els.modeButton.setAttribute("aria-expanded", "true");
+    // Land on whatever is selected, so the keys start from where the eye is.
+    stepOption(graph.mode, 0);
   }
 
   function buildModePicker() {
@@ -514,16 +596,63 @@
       var button = document.createElement("button");
       button.type = "button";
       button.setAttribute("role", "option");
+      // Reached with the arrow keys rather than Tab: thirty-odd modes would be
+      // a lot of tabbing, and there are five already.
+      button.tabIndex = -1;
       button.appendChild(modeMark(mode));
       var label = document.createElement("span");
       label.textContent = mode;
       button.appendChild(label);
       button.addEventListener("click", function () {
         selectMode(i);
+        // Back to the button, so the next key press lands somewhere sensible
+        // and focus is not left inside a menu that just closed.
+        els.modeButton.focus();
+      });
+      button.addEventListener("keydown", function (event) {
+        if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+          event.preventDefault();
+          stepOption(i, event.key === "ArrowDown" ? 1 : -1);
+        } else if (event.key === "Escape") {
+          event.preventDefault();
+          closeMenu();
+          els.modeButton.focus();
+        } else if (event.key === "Tab") {
+          closeMenu();
+        }
       });
       item.appendChild(button);
       els.modeMenu.appendChild(item);
     });
+  }
+
+  /* Keep the address bar in step with what is on screen, so the link can be
+   * handed to somebody else and open the same thing.
+   *
+   * The mode is only written when it is not the default, which keeps a plain
+   * lookup short. */
+  function updateUrl() {
+    var url = new URL(window.location.href);
+    var text = els.input.value.trim();
+
+    if (text) {
+      url.searchParams.set("s", text);
+    } else {
+      url.searchParams.delete("s");
+    }
+
+    if (graph.mode > 0) {
+      url.searchParams.set("m", graph.modes[graph.mode]);
+    } else {
+      url.searchParams.delete("m");
+    }
+
+    history.replaceState(null, "", url);
+  }
+
+  function modeIndex(name) {
+    var at = name ? graph.modes.indexOf(name) : -1;
+    return at < 0 ? 0 : at;
   }
 
   function submit() {
@@ -531,9 +660,7 @@
     if (!text) {
       return;
     }
-    var url = new URL(window.location.href);
-    url.searchParams.set("s", text);
-    history.replaceState(null, "", url);
+    updateUrl();
     run(text);
   }
 
@@ -548,10 +675,19 @@
     els.modeButton.addEventListener("click", function (event) {
       event.stopPropagation();
       if (els.modeMenu.hidden) {
-        els.modeMenu.hidden = false;
-        els.modeButton.setAttribute("aria-expanded", "true");
+        openMenu();
       } else {
         closeMenu();
+      }
+    });
+
+    // Down and up both open the menu, which is what a closed listbox is
+    // expected to do. Enter and Space are left alone: the button already
+    // toggles on those without help.
+    els.modeButton.addEventListener("keydown", function (event) {
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        openMenu();
       }
     });
     document.addEventListener("click", closeMenu);
@@ -582,16 +718,21 @@
     build(data);
     buildModePicker();
     wire();
-    // Mode 0 is "all" -- every mode counted together -- which is what the page
-    // opens on. build_graph.py puts it first in the modes list for this reason.
-    selectMode(0);
-    els.status.textContent = "";
 
-    var wanted = new URLSearchParams(window.location.search).get("s");
+    // The input is filled before the mode is chosen, because choosing a mode
+    // re-runs whatever is in the input. That is what makes a link carrying
+    // both run exactly once instead of twice.
+    var params = new URLSearchParams(window.location.search);
+    var wanted = params.get("s");
     if (wanted) {
       els.input.value = wanted;
-      run(wanted);
     }
+
+    // Mode 0 is "all" -- every mode counted together -- which is what the page
+    // opens on. build_graph.py puts it first in the modes list for this reason,
+    // and modeIndex falls back to it for a mode name that is not there.
+    selectMode(modeIndex(params.get("m")));
+    els.status.textContent = "";
   }
 
   function fail(error) {
@@ -612,13 +753,22 @@
       });
       graph.modes = meta.modes;
       graph.metaTop = meta.top;
-      els.topName.textContent = meta.top[0].username || "…";
+      updateTopName();
       updateNote();
+      showGenerated(meta.generated);
     })
     .catch(function () {
       // Not fatal: the graph carries the same top indices and names. Only the
       // mapset count next to the heading is missing, so that line stays blank.
+      // The graph's own generated stamp is picked up when it arrives instead.
     });
 
-  pending.then(start, fail);
+  pending.then(function (data) {
+    start(data);
+    showGenerated(data.generated);
+    ready();
+  }, function (error) {
+    fail(error);
+    ready();
+  });
 })();
