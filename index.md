@@ -2,10 +2,7 @@
 layout: default
 ---
 
-<!--
-  No blank lines and no indentation in here. kramdown ends a raw HTML block at
-  the first blank line, and would then wrap the rest of the markup in <p>.
--->
+<!-- Keep this block free of blank lines and indentation: kramdown ends a raw HTML block at the first blank line, and would wrap the rest in <p>. -->
 <div id="app" data-graph-url="{{ site.graph_url }}">
 <div class="erdos-head">
 <h1 id="erdos-title"><span id="top-name">&hellip;</span> number</h1>
