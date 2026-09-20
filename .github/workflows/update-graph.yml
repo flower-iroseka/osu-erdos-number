@@ -1,0 +1,170 @@
+name: update graph
+
+# Monthly, plus a fuller sweep every January and July.
+#
+# The monthly run stops as soon as it reaches a beatmapset it already has, so it
+# only picks up what has been ranked since last time -- a dozen or so requests.
+# That cannot see mapsets that were unranked, moved to the graveyard or deleted,
+# which is what the twice-a-year full run is for.
+#
+# GitHub disables scheduled workflows in repositories with no activity for 60
+# days. Committing to the data branch every month is that activity, so this
+# keeps itself alive and needs no separate keepalive job.
+
+on:
+  schedule:
+    - cron: "23 4 3 * *"     # every month: incremental
+    - cron: "41 4 3 1,7 *"   # January and July: full
+  workflow_dispatch:
+    inputs:
+      full:
+        description: Collect every ranked beatmapset instead of only the new ones
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+# Two runs pushing the data branch at once would race, and whichever finished
+# last would publish a store missing the other one's mapsets.
+concurrency:
+  group: update-graph
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    env:
+      OSU_CLIENT_ID: ${{ secrets.OSU_CLIENT_ID }}
+      OSU_CLIENT_SECRET: ${{ secrets.OSU_CLIENT_SECRET }}
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      # No pip install: scripts/ is standard library only, on purpose.
+
+      - name: Restore the store from the data branch
+        run: |
+          set -euo pipefail
+          mkdir -p data out
+
+          # ls-remote exits 2 when the ref simply is not there, and something
+          # else when it could not look. Those need telling apart: treating a
+          # network failure as "no store" would quietly re-collect everything.
+          set +e
+          git ls-remote --exit-code --heads origin data > /dev/null 2>&1
+          code=$?
+          set -e
+
+          if [ "$code" -eq 2 ]; then
+            echo "no data branch yet, collecting from nothing"
+            exit 0
+          elif [ "$code" -ne 0 ]; then
+            echo "could not ask whether the data branch exists (exit $code)" >&2
+            exit "$code"
+          fi
+
+          git fetch --depth=1 origin data
+          for file in beatsets.json users.json; do
+            # users.json carries names for people who may have since renamed or
+            # been banned, so it is kept alongside the store rather than rebuilt.
+            if git cat-file -e "FETCH_HEAD:$file" 2>/dev/null; then
+              git show "FETCH_HEAD:$file" > "data/$file"
+              echo "restored data/$file ($(wc -c < "data/$file") bytes)"
+            else
+              echo "data/$file is not on the branch yet"
+            fi
+          done
+
+      - name: Decide how much to collect
+        id: mode
+        run: |
+          set -euo pipefail
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            full="${{ inputs.full }}"
+          elif [ "${{ github.event.schedule }}" = "41 4 3 1,7 *" ]; then
+            full="true"
+          else
+            full="false"
+          fi
+
+          echo "full=$full" >> "$GITHUB_OUTPUT"
+          echo "full collection: $full"
+
+      - name: Collect from the osu! API
+        env:
+          FULL: ${{ steps.mode.outputs.full }}
+        run: |
+          set -euo pipefail
+          if [ "$FULL" = "true" ]; then
+            python scripts/fetch_beatsets.py --out data/beatsets.json --full
+          else
+            python scripts/fetch_beatsets.py --out data/beatsets.json
+          fi
+
+      - name: Build the graph
+        run: |
+          set -euo pipefail
+          python scripts/build_graph.py \
+            --store data/beatsets.json \
+            --user-cache data/users.json \
+            --out out \
+            --fetch-usernames
+
+      # Printed before the push so the numbers survive a failed publish.
+      - name: Report sizes
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          store = json.loads(Path("data/beatsets.json").read_text(encoding="utf-8"))
+          diffs = sum(len(d) for _host, d in store["sets"].values())
+          print(f"store: {len(store['sets'])} beatmapsets, {diffs} difficulties, "
+                f"{Path('data/beatsets.json').stat().st_size / 1e6:.1f} MB")
+          print(f"store last written: {store['generated']}")
+
+          for name in ("graph.json", "meta.json"):
+              path = Path("out") / name
+              print(f"{name}: {path.stat().st_size / 1e6:.2f} MB")
+          PY
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: graph
+          path: |
+            out/graph.json
+            out/meta.json
+          retention-days: 30
+
+      # The data branch is a single orphan commit that gets replaced every run,
+      # so it never accumulates history. Only the newest store matters; the old
+      # ones are dead weight that would grow without bound.
+      - name: Publish to the data branch
+        run: |
+          set -euo pipefail
+          stage="$(mktemp -d)"
+          cp data/beatsets.json data/users.json out/graph.json out/meta.json "$stage/"
+
+          cd "$stage"
+          git init -q -b data
+          git add -A
+          git -c user.name="github-actions[bot]" \
+              -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+              commit -q -m "Update the graph ($(date -u +%Y-%m-%d))"
+
+          # The token is in the URL because this is a fresh repository with no
+          # remote of its own. GITHUB_TOKEN is masked in the log either way.
+          git push --force --quiet \
+            "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" \
+            HEAD:data
+
+          echo "published $(git rev-parse --short HEAD) to the data branch"

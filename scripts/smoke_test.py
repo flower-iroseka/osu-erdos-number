@@ -8,6 +8,9 @@ Run this before building anything on top of it. It answers:
      requests to the same endpoint silently ignore it and return loved maps too.
   3. Does the collector itself still parse what the endpoint returns? It runs
      for real here, on one page, against the authenticated API.
+  4. Does /users?ids[]= hand back usernames for a batch of ids? The graph
+     builder needs this, and it would otherwise only be found out late in a
+     full collection.
 
     python scripts/smoke_test.py
 """
@@ -105,7 +108,35 @@ def main() -> int:
             print(f"     {marker} {mode:<7} user {user_id:<10} beatmap {beatmap_id}")
     print("\n   (* marks a difficulty whose mapper is not the host, i.e. a guest mapper)")
 
-    print("\nPASS: network reachable and the ranked filter works.")
+    # build_graph.py resolves names in batches of 50 near the end of its run. If
+    # the endpoint answers with something other than what we expect, that is a
+    # bad place to find out, so it gets checked here instead.
+    print("\n6. resolving a batch of usernames...")
+    wanted = sorted({user_id for _host, diffs in collected.values() for _bid, user_id, _m in diffs})
+    batch = wanted[:50]
+    users, _headers = osu_api.api_get("users", token, params={"ids[]": batch})
+
+    if not isinstance(users, list):
+        print(f"\nFAIL: /users answered with {type(users).__name__}, expected a list")
+        return 1
+
+    named = {str(user.get("id")): user.get("username") for user in users}
+    missing = [uid for uid in batch if str(uid) not in named]
+    blank = [uid for uid in batch if str(uid) in named and not named[str(uid)]]
+    print(f"   asked for {len(batch)}, got {len(named)} back")
+
+    if missing or blank:
+        print(
+            f"\nFAIL: {len(missing)} of {len(batch)} came back without a username and "
+            f"{len(blank)} came back with an empty one.\nbuild_graph.py would end up "
+            "with unnamed mappers all over the graph."
+        )
+        return 1
+
+    for uid in batch[:5]:
+        print(f"   {uid} -> {named[str(uid)]}")
+
+    print("\nPASS: network reachable, the ranked filter works, and names resolve.")
     return 0
 
 
