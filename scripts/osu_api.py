@@ -109,7 +109,9 @@ def api_get(
     """
     url = path if path.startswith("http") else f"{API_BASE}/{path.lstrip('/')}"
     if params:
-        url = f"{url}?{urllib.parse.urlencode(params)}"
+        # doseq so list values repeat the key, which is what endpoints taking
+        # `ids[]=` expect.
+        url = f"{url}?{urllib.parse.urlencode(params, doseq=True)}"
 
     headers = {
         "Accept": "application/json",
