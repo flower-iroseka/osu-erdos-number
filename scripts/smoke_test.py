@@ -123,18 +123,30 @@ def main() -> int:
     else:
         print(f"   approved difficulties seen: {ranked['approved']}")
 
-    # The other two searches have to come back with their own status, or the
-    # check above proves nothing: a filter that ignored the parameter entirely
-    # would pass it just as well.
-    if not loved or not set(loved) <= {"loved"}:
+    # The other searches have to come back with their own status and without any
+    # ranked ones. Both halves matter: a filter that ignored the parameter
+    # entirely would otherwise pass everything above just as well.
+    #
+    # Their contents do not have to be pure. A loved set can hold a difficulty
+    # whose own status is graveyard, which is not true of a ranked set: ranked
+    # is all-or-nothing for the whole set.
+    if "loved" not in loved:
         print(
             f"\nFAIL: s=loved returned {dict(loved)}, so the status parameter is "
             "not being honoured. That means s=ranked is not filtering either."
         )
         return 1
-    if qualified and not set(qualified) <= {"qualified"}:
+    if set(ranked) & set(loved):
+        print(f"\nFAIL: s=ranked and s=loved overlap on {sorted(set(ranked) & set(loved))}.")
+        return 1
+    if qualified and "qualified" not in qualified:
         print(f"\nFAIL: s=qualified returned {dict(qualified)}.")
         return 1
+    if qualified and set(ranked) & set(qualified):
+        print(f"\nFAIL: s=ranked and s=qualified overlap on {sorted(set(ranked) & set(qualified))}.")
+        return 1
+
+    print("   ranked and loved return disjoint sets, so the parameter is honoured")
 
     # Run the collector itself rather than inspecting the response by hand. This
     # is the same code path the real run uses, so a field the endpoint stopped
