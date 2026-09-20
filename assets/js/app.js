@@ -16,6 +16,13 @@
   // Drawn here rather than shipped as images, so the page has no icon
   // dependency. currentColor lets CSS pick the colour.
   var ICONS = {
+    // Four dots rather than a fifth mode glyph: "all" is not a mode, it is the
+    // other four taken together.
+    all:
+      '<circle cx="7.5" cy="7.5" r="3.3" fill="currentColor"/>' +
+      '<circle cx="16.5" cy="7.5" r="3.3" fill="currentColor"/>' +
+      '<circle cx="7.5" cy="16.5" r="3.3" fill="currentColor"/>' +
+      '<circle cx="16.5" cy="16.5" r="3.3" fill="currentColor"/>',
     osu:
       '<circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" stroke-width="2"/>' +
       '<circle cx="12" cy="12" r="3.5" fill="currentColor"/>',
@@ -434,7 +441,10 @@
 
   /* How many ranked/approved beatmapsets the top mapper contributed a
    * difficulty to, as the creator or as a guest. The count comes from meta.json;
-   * without it there is nothing to show, so the line stays empty. */
+   * without it there is nothing to show, so the line stays empty.
+   *
+   * The number is per mode, so the sentence names the mode when it is not the
+   * every-mode leaderboard. */
   function updateNote() {
     var index = graph.top[graph.mode];
     var entry = graph.metaTop ? graph.metaTop[graph.mode] : null;
@@ -444,11 +454,14 @@
     }
     // "participated in" rather than "hosted": the count includes sets the top
     // mapper was only a guest on, and the subtitle above says the same thing.
+    var mode = graph.modes[graph.mode];
     els.note.textContent =
       graph.names[index] +
       " has participated in a total number of " +
       entry.sets +
-      " ranked/approved mapsets.";
+      " ranked/approved " +
+      (mode === "all" ? "" : mode + " ") +
+      "mapsets.";
   }
 
   function selectMode(index) {
@@ -526,6 +539,8 @@
     build(data);
     buildModePicker();
     wire();
+    // Mode 0 is "all" -- every mode counted together -- which is what the page
+    // opens on. build_graph.py puts it first in the modes list for this reason.
     selectMode(0);
     els.status.textContent = "";
 

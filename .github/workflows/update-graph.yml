@@ -143,6 +143,8 @@ jobs:
           path: |
             out/graph.json
             out/meta.json
+            out/users.csv
+            out/users-*.csv
           retention-days: 30
 
       # The data branch is a single orphan commit that gets replaced every run,
@@ -156,6 +158,10 @@ jobs:
           stage="$(mktemp -d)"
           cp data/beatsets.json data/users.json "$stage/"
           cp out/graph.json out/meta.json out/users.csv "$stage/"
+          # Listed one by one rather than as users-*.csv, so a missing table says
+          # which one instead of failing on the glob.
+          cp out/users-osu.csv out/users-taiko.csv \
+             out/users-fruits.csv out/users-mania.csv "$stage/"
 
           cd "$stage"
           git init -q -b data

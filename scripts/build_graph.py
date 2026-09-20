@@ -35,6 +35,12 @@ import osu_api
 
 MODE_NAMES = ["osu", "taiko", "fruits", "mania"]
 
+# What the mode picker offers, in the order it offers them. "all" is not a real
+# mode: it counts a set once however many modes that set covers, which is what
+# makes it the overall leaderboard. The four real modes keep their API numbering,
+# so this list is display order only and the masks stay in MODE_NAMES order.
+DISPLAY_MODES = ["all"] + MODE_NAMES
+
 # /users?ids[]= accepts 50 at a time.
 USER_BATCH = 50
 
@@ -83,39 +89,42 @@ def credited_masks(diffs, host) -> dict[int, int]:
     return per_user
 
 
-def count_sets_per_mode(sets: dict) -> list[Counter]:
-    """For each mode, how many beatmapsets each mapper had a hand in.
+def count_participation(sets: dict) -> tuple[list[Counter], list[Counter]]:
+    """Per display mode, how many sets each mapper created and how many they guested on.
 
-    A set counts once per mapper no matter how many difficulties they made in it.
-    See credited_masks for who gets counted.
+    Index 0 is every mode together; the rest line up with MODE_NAMES. A set
+    counts once for a mapper in a mode however many difficulties they made in it,
+    and a set never counts as guest work for its own host. See credited_masks for
+    who gets credited at all.
+
+    Index 0 is counted outside the mode loop on purpose: a set covering two modes
+    still counts once there, so the column means "sets they had a hand in", not
+    "modes they touched".
     """
-    counts = [Counter() for _ in MODE_NAMES]
+    hosted = [Counter() for _ in DISPLAY_MODES]
+    guested = [Counter() for _ in DISPLAY_MODES]
 
     for _set_id, (host, diffs) in sets.items():
         for user_id, mask in credited_masks(diffs, host).items():
+            target = guested if user_id != host else hosted
+            target[0][user_id] += 1
             for mode in range(len(MODE_NAMES)):
                 if mask >> mode & 1:
-                    counts[mode][user_id] += 1
-
-    return counts
-
-
-def count_hosted_and_guested(sets: dict) -> tuple[Counter, Counter]:
-    """Per mapper: how many beatmapsets they created, and how many they only guested on.
-
-    A set the mapper created counts once for them no matter how many difficulties
-    they made in it, and the same set never counts as guest work for its own host.
-    """
-    hosted: Counter = Counter()
-    guested: Counter = Counter()
-
-    for _set_id, (host, diffs) in sets.items():
-        hosted[host] += 1
-        for user_id in {u for _b, u, _m in diffs}:
-            if user_id != host:
-                guested[user_id] += 1
+                    target[mode + 1][user_id] += 1
 
     return hosted, guested
+
+
+def total_counts(hosted: list[Counter], guested: list[Counter]) -> list[Counter]:
+    """Sets each mapper had a hand in, per display mode. Drives the leaderboard."""
+    return [
+        hosted[mode] + guested[mode] for mode in range(len(DISPLAY_MODES))
+    ]
+
+
+def sibling_table(base: Path, mode: str) -> Path:
+    """users.csv -> users-taiko.csv, so a mode's table sits next to the all-modes one."""
+    return base.with_name(f"{base.stem}-{mode}{base.suffix}")
 
 
 def write_user_table(path: Path, hosted: Counter, guested: Counter, cache: dict) -> int:
@@ -344,7 +353,9 @@ def main() -> int:
     parser.add_argument("--user-cache", type=Path, default=DEFAULT_USER_CACHE)
     parser.add_argument("--out", type=Path, default=DEFAULT_OUT)
     parser.add_argument("--table", type=Path,
-                        help="per-mapper hosted/guest counts (default: <out>/users.csv)")
+                        help="per-mapper hosted/guest counts for every mode "
+                             "(default: <out>/users.csv); one file per real mode "
+                             "is written beside it as <name>-<mode>.csv")
     parser.add_argument("--fetch-usernames", action="store_true")
     parser.add_argument("--delay", type=float, default=0.5)
     args = parser.parse_args()
@@ -357,14 +368,14 @@ def main() -> int:
     sets = store["sets"]
     print(f"loaded {len(sets)} beatmapsets from {args.store}")
 
-    counts = count_sets_per_mode(sets)
-    hosted, guested = count_hosted_and_guested(sets)
+    hosted, guested = count_participation(sets)
+    counts = total_counts(hosted, guested)
     tops = pick_top(counts)
     for mode, user_id in enumerate(tops):
         if user_id is None:
-            print(f"  {MODE_NAMES[mode]}: no data")
+            print(f"  {DISPLAY_MODES[mode]}: no data")
         else:
-            print(f"  {MODE_NAMES[mode]}: user {user_id} with {counts[mode][user_id]} sets")
+            print(f"  {DISPLAY_MODES[mode]}: user {user_id} with {counts[mode][user_id]} sets")
 
     edges, edge_sets, contributors = build_edges(sets)
     incidences = sum(len(ids) for ids in edge_sets.values())
@@ -399,7 +410,7 @@ def main() -> int:
 
     graph = {
         "generated": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        "modes": MODE_NAMES,
+        "modes": DISPLAY_MODES,
         "top": [index_of[uid] if uid is not None else -1 for uid in tops],
         "users": [[uid, cache.get(str(uid))] for uid in ordered],
         "edges": flat_edges,
@@ -408,18 +419,19 @@ def main() -> int:
 
     meta = {
         "generated": graph["generated"],
-        "modes": MODE_NAMES,
+        "modes": DISPLAY_MODES,
         "top": [
             {
-                "mode": MODE_NAMES[mode],
+                "mode": DISPLAY_MODES[mode],
                 "index": index_of[uid] if uid is not None else -1,
                 "user_id": uid,
                 "username": cache.get(str(uid)) if uid is not None else None,
                 # Every ranked/approved beatmapset they had a hand in, as its
-                # creator or as a guest. Counted the same way the leaderboard
-                # is, so it is not restricted to this mode. The page shows it
-                # next to the heading.
-                "sets": (hosted[uid] + guested[uid]) if uid is not None else 0,
+                # creator or as a guest. Under "all" that is every mode at once;
+                # under a real mode it is only the sets that mode covers. This is
+                # the count they won their leaderboard with, and the page shows
+                # it next to the heading.
+                "sets": counts[mode][uid] if uid is not None else 0,
             }
             for mode, uid in enumerate(tops)
         ],
@@ -433,12 +445,19 @@ def main() -> int:
     graph_path.write_bytes(payload)
     meta_path.write_text(json.dumps(meta, separators=(",", ":")), encoding="utf-8")
     table_path = args.table or (args.out / "users.csv")
-    listed = write_user_table(table_path, hosted, guested, cache)
+    listed = write_user_table(table_path, hosted[0], guested[0], cache)
 
     packed = gzip.compress(payload, 9)
     print(f"\nwrote {graph_path}: {len(payload) / 1e6:.2f} MB raw, {len(packed) / 1e6:.2f} MB gzipped")
     print(f"wrote {meta_path}: {meta_path.stat().st_size} bytes")
-    print(f"wrote {table_path}: {listed} mappers")
+    print(f"wrote {table_path}: {listed} mappers, every mode")
+
+    # One table per real mode as well, so the per-mode leaderboards are readable
+    # without rerunning anything.
+    for mode in range(1, len(DISPLAY_MODES)):
+        path = sibling_table(table_path, DISPLAY_MODES[mode])
+        print(f"wrote {path}: {write_user_table(path, hosted[mode], guested[mode], cache)} mappers")
+
     print(f"{len(ordered)} mappers, {len(edges)} edges")
     return 0
 
