@@ -16,13 +16,6 @@
   // Drawn here rather than shipped as images, so the page has no icon
   // dependency. currentColor lets CSS pick the colour.
   var ICONS = {
-    // Four dots rather than a fifth mode glyph: "all" is not a mode, it is the
-    // other four taken together.
-    all:
-      '<circle cx="7.5" cy="7.5" r="3.3" fill="currentColor"/>' +
-      '<circle cx="16.5" cy="7.5" r="3.3" fill="currentColor"/>' +
-      '<circle cx="7.5" cy="16.5" r="3.3" fill="currentColor"/>' +
-      '<circle cx="16.5" cy="16.5" r="3.3" fill="currentColor"/>',
     osu:
       '<circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" stroke-width="2"/>' +
       '<circle cx="12" cy="12" r="3.5" fill="currentColor"/>',
@@ -434,6 +427,23 @@
     return svg;
   }
 
+  /* The mark next to a mode's name, in a box of a fixed size so the picker does
+   * not change width when the selection changes. "all" is not a mode, so it has
+   * no glyph of its own and is spelled out instead. */
+  function modeMark(mode) {
+    var box = document.createElement("span");
+    box.className = "mode-mark";
+    if (mode === "all") {
+      var text = document.createElement("span");
+      text.className = "mode-text";
+      text.textContent = "ALL";
+      box.appendChild(text);
+    } else {
+      box.appendChild(iconSvg(mode));
+    }
+    return box;
+  }
+
   function closeMenu() {
     els.modeMenu.hidden = true;
     els.modeButton.setAttribute("aria-expanded", "false");
@@ -454,20 +464,21 @@
     }
     // "participated in" rather than "hosted": the count includes sets the top
     // mapper was only a guest on, and the subtitle above says the same thing.
+    // The scope goes at the end, so it reads the same either way round.
     var mode = graph.modes[graph.mode];
     els.note.textContent =
       graph.names[index] +
       " has participated in a total number of " +
       entry.sets +
-      " ranked/approved " +
-      (mode === "all" ? "" : mode + " ") +
-      "mapsets.";
+      " ranked/approved mapsets in " +
+      (mode === "all" ? "all modes" : mode + " mode") +
+      ".";
   }
 
   function selectMode(index) {
     graph.mode = index;
     els.topName.textContent = graph.names[graph.top[index]] || "…";
-    els.modeIcon.replaceChildren(iconSvg(graph.modes[index]));
+    els.modeIcon.replaceChildren(modeMark(graph.modes[index]));
     updateNote();
     Array.prototype.forEach.call(els.modeMenu.children, function (item, i) {
       item.firstChild.setAttribute("aria-selected", String(i === index));
@@ -480,14 +491,14 @@
   }
 
   function buildModePicker() {
-    els.modeIcon.appendChild(iconSvg(graph.modes[0]));
+    els.modeIcon.appendChild(modeMark(graph.modes[0]));
 
     graph.modes.forEach(function (mode, i) {
       var item = document.createElement("li");
       var button = document.createElement("button");
       button.type = "button";
       button.setAttribute("role", "option");
-      button.appendChild(iconSvg(mode));
+      button.appendChild(modeMark(mode));
       var label = document.createElement("span");
       label.textContent = mode;
       button.appendChild(label);

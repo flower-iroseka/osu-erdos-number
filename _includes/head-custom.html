@@ -1,1 +1,7 @@
-<script defer src="{{ '/assets/js/app.js' | relative_url }}"></script>
+<!--
+  The revision is in the URL because Pages serves this with a ten minute
+  cache. Without it, a browser that loaded the site just before a deploy keeps
+  running the old script against the new data. style.css is versioned the same
+  way by the theme.
+-->
+<script defer src="{{ '/assets/js/app.js?v=' | append: site.github.build_revision | relative_url }}"></script>
