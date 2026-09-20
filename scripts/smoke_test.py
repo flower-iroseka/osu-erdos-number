@@ -6,6 +6,8 @@ Run this before building anything on top of it. It answers:
      runners come from datacenter IPs, and osu! is behind Cloudflare.
   2. Does an OAuth token actually make the `s=ranked` filter work? Anonymous
      requests to the same endpoint silently ignore it and return loved maps too.
+  3. Does the collector itself still parse what the endpoint returns? It runs
+     for real here, on one page, against the authenticated API.
 
     python scripts/smoke_test.py
 """
@@ -14,6 +16,7 @@ from __future__ import annotations
 
 import sys
 
+import fetch_beatsets
 import osu_api
 
 # Which statuses we expect once the filter is applied. `ranked` covers
@@ -68,16 +71,37 @@ def main() -> int:
         print("\nFAIL: no beatmapsets came back; cannot tell whether the filter works.")
         return 1
 
-    print("\n4. sample of what the fetch script will collect:")
-    for beatmapset in sets[:3]:
-        print(f"\n   set {beatmapset['id']}  {beatmapset.get('artist')} - {beatmapset.get('title')}")
-        print(f"     host: {beatmapset.get('creator')} (user {beatmapset.get('user_id')})")
-        for beatmap in beatmapset.get("beatmaps") or []:
-            marker = " " if beatmap.get("user_id") == beatmapset.get("user_id") else "*"
-            print(
-                f"     {marker} {beatmap.get('mode'):<7} user {beatmap.get('user_id'):<10} "
-                f"{beatmap.get('version')!r}"
-            )
+    # Run the collector itself rather than inspecting the response by hand. This
+    # is the same code path the real run uses, so a field the endpoint stopped
+    # returning shows up here instead of an hour into a collection.
+    print("\n4. running the collector for one page...")
+    try:
+        collected, stats = fetch_beatsets.collect(token, known=set(), full=True, limit=1)
+    except (KeyError, TypeError) as error:
+        print(
+            f"\nFAIL: the collector could not read the response: {error!r}\n"
+            "It expects fields the endpoint is not returning, so it needs "
+            "updating before a full run is worth starting."
+        )
+        return 1
+
+    diff_count = sum(len(diffs) for _, diffs in collected.values())
+    guest_count = sum(
+        1 for host, diffs in collected.values() for _, user_id, _ in diffs if user_id != host
+    )
+    print(
+        f"   collected {len(collected)} sets and {diff_count} difficulties "
+        f"in {stats['pages']} page(s)"
+    )
+    print(f"   {guest_count} of those difficulties are by someone other than the set host")
+
+    print("\n5. sample of what the collector stores:")
+    for set_id, (host, diffs) in list(collected.items())[:3]:
+        print(f"\n   set {set_id}  host user {host}")
+        for beatmap_id, user_id, mode_int in diffs:
+            marker = " " if user_id == host else "*"
+            mode = fetch_beatsets.MODE_NAMES[mode_int]
+            print(f"     {marker} {mode:<7} user {user_id:<10} beatmap {beatmap_id}")
     print("\n   (* marks a difficulty whose mapper is not the host, i.e. a guest mapper)")
 
     print("\nPASS: network reachable and the ranked filter works.")
