@@ -3,21 +3,48 @@
 
 @import "jekyll-theme-cayman";
 
-// Only the query UI is styled here. The banner, footer, colours and typography
-// all come from the theme, so the page still looks like a Cayman page.
+// The theme's banner title and tagline are gone (see _layouts/default.html).
+// Everything below is the query UI, which now lives in the header and has to
+// work on the header's green gradient.
+
+.page-header {
+  @include large {
+    padding: 3rem 4rem;
+  }
+
+  @include medium {
+    padding: 2.5rem 3rem;
+  }
+
+  @include small {
+    padding: 2rem 1rem;
+  }
+}
 
 .erdos-head {
   display: flex;
   align-items: center;
+  justify-content: center;
   flex-wrap: wrap;
-  gap: 0.75rem;
-  margin-top: 2rem;
+  gap: 0.75rem 1rem;
 }
 
 #erdos-title {
   margin: 0;
-  font-size: 2.5rem;
+  font-size: 2.6rem;
+  font-weight: normal;
   line-height: 1.2;
+}
+
+// The aside next to the heading. Two lines at most, so it ends up about as
+// tall as the heading itself rather than dragging the row out.
+#top-note {
+  max-width: 21rem;
+  margin: 0;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  text-align: left;
+  opacity: 0.8;
 }
 
 .mode-picker {
@@ -28,27 +55,32 @@
 #mode-button {
   display: flex;
   align-items: center;
-  padding: 0.2rem 0.45rem;
-  color: #606c71;
-  background: none;
-  border: 0;
-  border-radius: 0.3rem;
+  padding: 0.3rem 0.5rem;
+  color: #fff;
+  background-color: rgba(255, 255, 255, 0.14);
+  // A standing border rather than one that appears on hover: nothing else in
+  // the header looks like a control, so this has to say "you can click me"
+  // without being touched first.
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  border-radius: 0.4rem;
   cursor: pointer;
 
   &:hover,
   &[aria-expanded="true"] {
-    background-color: #f3f6fa;
+    background-color: rgba(255, 255, 255, 0.32);
+    border-color: #fff;
   }
 
   svg {
     display: block;
-    width: 1.5rem;
-    height: 1.5rem;
+    width: 1.9rem;
+    height: 1.9rem;
   }
 
   .caret {
-    margin-left: 0.2rem;
-    font-size: 0.75rem;
+    margin-left: 0.3rem;
+    font-size: 1rem;
+    line-height: 1;
   }
 }
 
@@ -57,13 +89,14 @@
   top: 100%;
   left: 0;
   z-index: 10;
-  margin: 0.25rem 0 0;
+  margin: 0.35rem 0 0;
   padding: 0.25rem;
   list-style: none;
+  text-align: left;
   background-color: #fff;
   border: 1px solid #dce6f0;
   border-radius: 0.3rem;
-  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.12);
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.18);
 
   li {
     margin: 0;
@@ -95,46 +128,60 @@
 
   svg {
     flex: none;
-    width: 1.25rem;
-    height: 1.25rem;
+    width: 1.3rem;
+    height: 1.3rem;
   }
+}
+
+.page-subtitle {
+  margin: 0.85rem 0 1.4rem;
+  font-size: 0.95rem;
+  opacity: 0.75;
 }
 
 .query {
   display: flex;
+  justify-content: center;
   gap: 0.5rem;
-  margin: 2rem 0 1.5rem;
 }
 
 #mapper-input {
-  flex: 1;
-  min-width: 0;
-  padding: 0.6rem 0.8rem;
+  width: 100%;
+  // Deliberately narrower than the header. It takes a name or an id, not a
+  // paragraph.
+  max-width: 21rem;
+  padding: 0.55rem 0.8rem;
   font: inherit;
-  font-size: 1.15rem;
-  color: #606c71;
-  border: 1px solid #dce6f0;
+  font-size: 1rem;
+  color: #fff;
+  background-color: rgba(255, 255, 255, 0.14);
+  border: 1px solid rgba(255, 255, 255, 0.45);
   border-radius: 0.3rem;
 
+  &::placeholder {
+    color: rgba(255, 255, 255, 0.65);
+  }
+
   &:focus {
-    border-color: #1e6bb8;
     outline: none;
-    box-shadow: 0 0 0 2px rgba(30, 107, 184, 0.15);
+    background-color: rgba(255, 255, 255, 0.24);
+    border-color: #fff;
   }
 }
 
 #go {
   flex: none;
-  padding: 0 1.2rem;
-  font-size: 1.15rem;
+  padding: 0 1rem;
+  font-size: 1rem;
   color: #fff;
-  background-color: #159957;
-  border: 0;
+  background-color: rgba(255, 255, 255, 0.14);
+  border: 1px solid rgba(255, 255, 255, 0.45);
   border-radius: 0.3rem;
   cursor: pointer;
 
   &:hover {
-    background-color: #12824a;
+    background-color: rgba(255, 255, 255, 0.32);
+    border-color: #fff;
   }
 }
 
@@ -154,13 +201,10 @@
 }
 
 .path-row {
+  // The map lists hang below their arrows, so something has to hold space for
+  // them. app.js measures the tallest open list and sets the padding.
+  position: relative;
   margin: 0.4rem 0;
-
-  // The expanded map list is absolutely positioned under its arrow, so the row
-  // has to make room for it or it would sit on top of the next path.
-  &.open {
-    padding-bottom: 2em;
-  }
 }
 
 .arrow-wrap {
@@ -178,6 +222,8 @@
   cursor: pointer;
 }
 
+// One id per line. Side by side they make a wide block, and two open arrows
+// next to each other would run into one another.
 .arrow-maps {
   display: none;
   position: absolute;
@@ -185,8 +231,13 @@
   left: 50%;
   transform: translateX(-50%);
   font-size: 0.7em;
-  line-height: 1.4;
+  line-height: 1.45;
   white-space: nowrap;
+  text-align: center;
+}
+
+.arrow-maps a {
+  display: block;
 }
 
 .arrow-wrap.open .arrow-maps {
@@ -197,4 +248,16 @@
   margin: 0.4rem 0 0;
   font-size: 0.9rem;
   color: #819198;
+}
+
+.site-footer {
+  padding-top: 1.5rem;
+  margin-top: 3rem;
+  font-size: 0.75rem;
+  opacity: 0.6;
+}
+
+.site-footer-owner {
+  display: inline;
+  font-weight: normal;
 }

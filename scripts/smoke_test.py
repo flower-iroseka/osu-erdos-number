@@ -6,6 +6,9 @@ Run this before building anything on top of it. It answers:
      runners come from datacenter IPs, and osu! is behind Cloudflare.
   2. Does an OAuth token actually make the `s=ranked` filter work? Anonymous
      requests to the same endpoint silently ignore it and return loved maps too.
+     Checked both ways round: s=ranked must come back with ranked (and approved)
+     and nothing else, and s=loved must come back with loved, which is what
+     stops a filter that ignores the parameter from passing.
   3. Does the collector itself still parse what the endpoint returns? It runs
      for real here, on one page, against the authenticated API.
   4. Does /users?ids[]= hand back usernames for a batch of ids? The graph
@@ -18,6 +21,8 @@ Run this before building anything on top of it. It answers:
 from __future__ import annotations
 
 import sys
+import time
+from collections import Counter
 
 import build_graph
 import fetch_beatsets
@@ -26,6 +31,33 @@ import osu_api
 # Which statuses we expect once the filter is applied. `ranked` covers
 # approved=2 as well, since osu! merged the two categories.
 EXPECTED_STATUSES = {"ranked", "approved"}
+
+# Enough pages that an approved map, which is a small share of the whole, has a
+# fair chance of turning up. One page would prove almost nothing.
+STATUS_PAGES = 12
+
+
+def statuses_across(token: str, kind: str, pages: int) -> Counter:
+    """Every difficulty status seen over a few pages of one search."""
+    seen: Counter = Counter()
+    cursor = None
+
+    for _ in range(pages):
+        params = {"s": kind}
+        if cursor:
+            params["cursor_string"] = cursor
+        payload, headers = osu_api.api_get("beatmapsets/search", token, params=params)
+
+        for beatmapset in payload.get("beatmapsets") or []:
+            for beatmap in beatmapset.get("beatmaps") or []:
+                seen[beatmap.get("status")] += 1
+
+        cursor = payload.get("cursor_string")
+        if not cursor:
+            break
+        time.sleep(max(0.4, osu_api.throttle_delay(headers)))
+
+    return seen
 
 
 def main() -> int:
@@ -52,28 +84,56 @@ def main() -> int:
         print("   no rate-limit header in the response; the collector falls back")
         print("   to a fixed delay between pages instead of pacing off it")
 
-    print("\n3. checking that the ranked filter was actually applied...")
+    print("\n3. checking the status filter, in both directions...")
     modes: set[str] = set()
-    statuses: set[str] = set()
     for beatmapset in sets:
         for beatmap in beatmapset.get("beatmaps") or []:
             modes.add(beatmap.get("mode"))
-            statuses.add(beatmap.get("status"))
+    print(f"   modes seen in s=ranked: {sorted(modes)}")
 
-    print(f"   statuses seen: {sorted(statuses)}")
-    print(f"   modes seen:    {sorted(modes)}")
+    ranked = statuses_across(token, "ranked", STATUS_PAGES)
+    loved = statuses_across(token, "loved", 2)
+    qualified = statuses_across(token, "qualified", 2)
 
-    unexpected = statuses - EXPECTED_STATUSES
-    if unexpected:
+    print(f"   s=ranked    over {STATUS_PAGES} pages: {dict(ranked)}")
+    print(f"   s=loved     over 2 pages:  {dict(loved)}")
+    print(f"   s=qualified over 2 pages:  {dict(qualified)}")
+
+    if not ranked:
+        print("\nFAIL: s=ranked came back with no difficulties at all.")
+        return 1
+
+    extra = set(ranked) - EXPECTED_STATUSES
+    if extra:
         print(
-            f"\nFAIL: the filter is not being applied. Got {sorted(unexpected)} "
-            "but only ranked/approved were requested.\n"
-            "Without a working filter the whole dataset would be wrong, so this "
-            "has to be sorted out first."
+            f"\nFAIL: s=ranked returned {sorted(extra)}, but only ranked/approved "
+            "were asked for.\nWithout a working filter the whole dataset would be "
+            "wrong, so this has to be sorted out first."
         )
         return 1
-    if not sets:
-        print("\nFAIL: no beatmapsets came back; cannot tell whether the filter works.")
+    if ranked.get("ranked", 0) == 0:
+        print("\nFAIL: s=ranked returned no ranked difficulties at all.")
+        return 1
+    if ranked.get("approved", 0) == 0:
+        print(
+            f"   note: no approved maps in {STATUS_PAGES} pages. They are rare, so "
+            "this is expected, but it means approved is only covered by the "
+            "status check above, not seen directly."
+        )
+    else:
+        print(f"   approved difficulties seen: {ranked['approved']}")
+
+    # The other two searches have to come back with their own status, or the
+    # check above proves nothing: a filter that ignored the parameter entirely
+    # would pass it just as well.
+    if not loved or not set(loved) <= {"loved"}:
+        print(
+            f"\nFAIL: s=loved returned {dict(loved)}, so the status parameter is "
+            "not being honoured. That means s=ranked is not filtering either."
+        )
+        return 1
+    if qualified and not set(qualified) <= {"qualified"}:
+        print(f"\nFAIL: s=qualified returned {dict(qualified)}.")
         return 1
 
     # Run the collector itself rather than inspecting the response by hand. This

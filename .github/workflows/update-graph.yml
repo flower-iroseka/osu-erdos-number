@@ -148,11 +148,14 @@ jobs:
       # The data branch is a single orphan commit that gets replaced every run,
       # so it never accumulates history. Only the newest store matters; the old
       # ones are dead weight that would grow without bound.
+      #
+      # users.csv rides along for reading by hand. Nothing loads it at runtime.
       - name: Publish to the data branch
         run: |
           set -euo pipefail
           stage="$(mktemp -d)"
-          cp data/beatsets.json data/users.json out/graph.json out/meta.json "$stage/"
+          cp data/beatsets.json data/users.json "$stage/"
+          cp out/graph.json out/meta.json out/users.csv "$stage/"
 
           cd "$stage"
           git init -q -b data

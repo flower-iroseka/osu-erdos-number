@@ -40,6 +40,7 @@
     modeMenu: document.getElementById("mode-menu"),
     input: document.getElementById("mapper-input"),
     go: document.getElementById("go"),
+    note: document.getElementById("top-note"),
     result: document.getElementById("result"),
     paths: document.getElementById("paths"),
     status: document.getElementById("status")
@@ -318,11 +319,24 @@
       button.setAttribute("aria-expanded", String(open));
       var row = wrap.closest(".path-row");
       if (row) {
-        row.classList.toggle("open", !!row.querySelector(".arrow-wrap.open"));
+        fitRow(row);
       }
     });
 
     return wrap;
+  }
+
+  /* The map list is positioned under its arrow so that opening it does not move
+   * the arrow out from under the pointer. That means it would also land on top
+   * of the next path, so the row has to be given room for whichever list is
+   * open, and the room taken back when nothing is. */
+  function fitRow(row) {
+    var open = row.querySelectorAll(".arrow-wrap.open .arrow-maps");
+    var tallest = 0;
+    for (var i = 0; i < open.length; i++) {
+      tallest = Math.max(tallest, open[i].offsetHeight);
+    }
+    row.style.paddingBottom = tallest ? tallest + 8 + "px" : "";
   }
 
   function pathRow(path) {
@@ -418,10 +432,28 @@
     els.modeButton.setAttribute("aria-expanded", "false");
   }
 
+  /* How many ranked/approved beatmapsets the top mapper contributed a
+   * difficulty to, as the creator or as a guest. The count comes from meta.json;
+   * without it there is nothing to show, so the line stays empty. */
+  function updateNote() {
+    var index = graph.top[graph.mode];
+    var entry = graph.metaTop ? graph.metaTop[graph.mode] : null;
+    if (index < 0 || !entry || typeof entry.sets !== "number") {
+      els.note.textContent = "";
+      return;
+    }
+    els.note.textContent =
+      graph.names[index] +
+      " has hosted a total number of " +
+      entry.sets +
+      " ranked/approved mapsets.";
+  }
+
   function selectMode(index) {
     graph.mode = index;
     els.topName.textContent = graph.names[graph.top[index]] || "…";
     els.modeIcon.replaceChildren(iconSvg(graph.modes[index]));
+    updateNote();
     Array.prototype.forEach.call(els.modeMenu.children, function (item, i) {
       item.firstChild.setAttribute("aria-selected", String(i === index));
     });
@@ -519,10 +551,13 @@
         return entry.index;
       });
       graph.modes = meta.modes;
+      graph.metaTop = meta.top;
       els.topName.textContent = meta.top[0].username || "…";
+      updateNote();
     })
     .catch(function () {
-      // Not fatal: the graph itself carries the same fields.
+      // Not fatal: the graph carries the same top indices and names. Only the
+      // mapset count next to the heading is missing, so that line stays blank.
     });
 
   pending.then(start, fail);

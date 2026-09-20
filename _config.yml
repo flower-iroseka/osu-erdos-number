@@ -1,5 +1,8 @@
+# The tab title, and nothing else. jekyll-seo-tag appends `description` to it
+# on the home page, which would make the tab read "osu! erdős | How many
+# handshakes away...". The description tag is written by hand in
+# _includes/head-custom.html instead.
 title: osu! erdős
-description: How many handshakes away from the mapper with the most ranked beatmaps?
 
 remote_theme: pages-themes/cayman@v0.2.0
 plugins:

@@ -23,6 +23,7 @@ apart from "this mapper has ranked maps but has never collaborated".
 from __future__ import annotations
 
 import argparse
+import csv
 import gzip
 import json
 import sys
@@ -40,6 +41,7 @@ USER_BATCH = 50
 DEFAULT_STORE = Path("data/beatsets.json")
 DEFAULT_USER_CACHE = Path("data/users.json")
 DEFAULT_OUT = Path("out")
+DEFAULT_TABLE = Path("out/users.csv")
 
 
 def load_json(path: Path, fallback):
@@ -57,20 +59,88 @@ def mode_masks(diffs) -> dict[int, int]:
     return per_user
 
 
+def credited_masks(diffs, host) -> dict[int, int]:
+    """Who gets credit for a beatmapset, and under which modes.
+
+    Normally that is everyone who made a difficulty, under the modes they made,
+    so a host who only mapped the mania difficulty of a multi-mode set is not
+    credited with its osu difficulty.
+
+    A creator who mapped none of the set is the exception: about 3% of ranked
+    sets have somebody else making every difficulty. They still made the set, so
+    they are credited with it under the modes the set covers. Leaving them out
+    would both drop them from the leaderboard and leave them unconnected to the
+    people they invited to map it.
+    """
+    per_user = mode_masks(diffs)
+
+    if host not in per_user:
+        set_mask = 0
+        for mask in per_user.values():
+            set_mask |= mask
+        per_user[host] = set_mask
+
+    return per_user
+
+
 def count_sets_per_mode(sets: dict) -> list[Counter]:
-    """For each mode, how many beatmapsets each mapper contributed a difficulty to.
+    """For each mode, how many beatmapsets each mapper had a hand in.
 
     A set counts once per mapper no matter how many difficulties they made in it.
+    See credited_masks for who gets counted.
     """
     counts = [Counter() for _ in MODE_NAMES]
 
-    for _set_id, (_host, diffs) in sets.items():
-        for user_id, mask in mode_masks(diffs).items():
+    for _set_id, (host, diffs) in sets.items():
+        for user_id, mask in credited_masks(diffs, host).items():
             for mode in range(len(MODE_NAMES)):
                 if mask >> mode & 1:
                     counts[mode][user_id] += 1
 
     return counts
+
+
+def count_hosted_and_guested(sets: dict) -> tuple[Counter, Counter]:
+    """Per mapper: how many beatmapsets they created, and how many they only guested on.
+
+    A set the mapper created counts once for them no matter how many difficulties
+    they made in it, and the same set never counts as guest work for its own host.
+    """
+    hosted: Counter = Counter()
+    guested: Counter = Counter()
+
+    for _set_id, (host, diffs) in sets.items():
+        hosted[host] += 1
+        for user_id in {u for _b, u, _m in diffs}:
+            if user_id != host:
+                guested[user_id] += 1
+
+    return hosted, guested
+
+
+def write_user_table(path: Path, hosted: Counter, guested: Counter, cache: dict) -> int:
+    """Write every mapper's hosted and guest counts, busiest first.
+
+    This is only for reading from the repository; the site never loads it.
+    """
+    everyone = set(hosted) | set(guested)
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(["user_id", "username", "hosted", "guested", "total"])
+        for user_id in sorted(everyone, key=lambda uid: (-(hosted[uid] + guested[uid]), uid)):
+            writer.writerow(
+                [
+                    user_id,
+                    cache.get(str(user_id)) or "",
+                    hosted[user_id],
+                    guested[user_id],
+                    hosted[user_id] + guested[user_id],
+                ]
+            )
+
+    return len(everyone)
 
 
 def pick_top(counts: list[Counter]) -> list[int | None]:
@@ -97,8 +167,8 @@ def build_edges(sets: dict) -> tuple[dict, dict, list[int]]:
     edge_sets: dict[tuple[int, int], list[int]] = {}
     contributors: list[int] = []
 
-    for set_id, (_host, diffs) in sets.items():
-        per_user = mode_masks(diffs)
+    for set_id, (host, diffs) in sets.items():
+        per_user = credited_masks(diffs, host)
         users = sorted(per_user)
         contributors.append(len(users))
 
@@ -273,6 +343,8 @@ def main() -> int:
     parser.add_argument("--store", type=Path, default=DEFAULT_STORE)
     parser.add_argument("--user-cache", type=Path, default=DEFAULT_USER_CACHE)
     parser.add_argument("--out", type=Path, default=DEFAULT_OUT)
+    parser.add_argument("--table", type=Path,
+                        help="per-mapper hosted/guest counts (default: <out>/users.csv)")
     parser.add_argument("--fetch-usernames", action="store_true")
     parser.add_argument("--delay", type=float, default=0.5)
     args = parser.parse_args()
@@ -286,6 +358,7 @@ def main() -> int:
     print(f"loaded {len(sets)} beatmapsets from {args.store}")
 
     counts = count_sets_per_mode(sets)
+    hosted, guested = count_hosted_and_guested(sets)
     tops = pick_top(counts)
     for mode, user_id in enumerate(tops):
         if user_id is None:
@@ -342,6 +415,11 @@ def main() -> int:
                 "index": index_of[uid] if uid is not None else -1,
                 "user_id": uid,
                 "username": cache.get(str(uid)) if uid is not None else None,
+                # Every ranked/approved beatmapset they had a hand in, as its
+                # creator or as a guest. Counted the same way the leaderboard
+                # is, so it is not restricted to this mode. The page shows it
+                # next to the heading.
+                "sets": (hosted[uid] + guested[uid]) if uid is not None else 0,
             }
             for mode, uid in enumerate(tops)
         ],
@@ -354,10 +432,13 @@ def main() -> int:
     payload = json.dumps(graph, separators=(",", ":")).encode()
     graph_path.write_bytes(payload)
     meta_path.write_text(json.dumps(meta, separators=(",", ":")), encoding="utf-8")
+    table_path = args.table or (args.out / "users.csv")
+    listed = write_user_table(table_path, hosted, guested, cache)
 
     packed = gzip.compress(payload, 9)
     print(f"\nwrote {graph_path}: {len(payload) / 1e6:.2f} MB raw, {len(packed) / 1e6:.2f} MB gzipped")
     print(f"wrote {meta_path}: {meta_path.stat().st_size} bytes")
+    print(f"wrote {table_path}: {listed} mappers")
     print(f"{len(ordered)} mappers, {len(edges)} edges")
     return 0
 
