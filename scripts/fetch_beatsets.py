@@ -68,7 +68,13 @@ def save_store(path: Path, store: dict) -> None:
     tmp.replace(path)
 
 
-def collect(token: str, known: set[str], full: bool, limit: int | None) -> tuple[dict, dict]:
+def collect(
+    token: str,
+    known: set[str],
+    full: bool,
+    limit: int | None,
+    request_delay: float = 0.5,
+) -> tuple[dict, dict]:
     """Page through the search until we run out or reach a set we already have.
 
     Returns (newly collected sets, stats).
@@ -116,7 +122,11 @@ def collect(token: str, known: set[str], full: bool, limit: int | None) -> tuple
         if not cursor:
             break
 
-        delay = osu_api.throttle_delay(headers.get("X-RateLimit-Remaining"))
+        # The API does not always send rate-limit headers, so the fixed delay is
+        # the real guard; the header only makes us slow down further when we are
+        # getting close. A full collection is around 1200 pages, which at this
+        # pace takes roughly ten minutes.
+        delay = max(request_delay, osu_api.throttle_delay(headers))
         if delay:
             time.sleep(delay)
 
@@ -128,6 +138,12 @@ def main() -> int:
     parser.add_argument("--out", type=Path, default=DEFAULT_OUT)
     parser.add_argument("--full", action="store_true", help="ignore the existing store")
     parser.add_argument("--limit", type=int, help="stop after this many pages (for testing)")
+    parser.add_argument(
+        "--delay",
+        type=float,
+        default=0.5,
+        help="seconds to wait between pages (default: %(default)s)",
+    )
     args = parser.parse_args()
 
     existing = {"generated": None, "sets": {}} if args.full else load_store(args.out)
@@ -139,7 +155,7 @@ def main() -> int:
 
     started = time.monotonic()
     print("collecting...")
-    collected, stats = collect(token, known, args.full, args.limit)
+    collected, stats = collect(token, known, args.full, args.limit, args.delay)
     elapsed = time.monotonic() - started
 
     if collected:

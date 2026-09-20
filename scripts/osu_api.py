@@ -25,6 +25,9 @@ USER_AGENT = "osu-erdos-number/0.1"
 # recovering from a 429.
 RATE_FLOOR = 200
 
+# Response header keys are lowercased by api_get, so this is too.
+RATE_REMAINING_HEADER = "x-ratelimit-remaining"
+
 
 class OsuApiError(RuntimeError):
     pass
@@ -124,7 +127,10 @@ def api_get(
         try:
             request = urllib.request.Request(url, headers=headers)
             with urllib.request.urlopen(request, timeout=timeout) as response:
-                return json.load(response), dict(response.headers)
+                # Lowercase the keys. HTTP/2 sends them lowercase, and turning
+                # the case-insensitive HTTPMessage into a plain dict would make
+                # lookups miss depending on how the server happened to spell them.
+                return json.load(response), {k.lower(): v for k, v in response.headers.items()}
 
         except urllib.error.HTTPError as error:
             last_error = error
@@ -140,11 +146,12 @@ def api_get(
     raise RateLimited(f"gave up on {url} after {retries} attempts: {last_error!r}")
 
 
-def throttle_delay(remaining: str | None, floor: int = RATE_FLOOR) -> float:
-    """Seconds to pause for, based on the rate-limit header osu! sends back.
+def throttle_delay(headers: dict, floor: int = RATE_FLOOR) -> float:
+    """Seconds to pause for, based on the rate-limit headers osu! sends back.
 
-    Returns 0 when we still have plenty of budget.
+    Returns 0 when the header is absent or there is still plenty of budget.
     """
+    remaining = headers.get(RATE_REMAINING_HEADER)
     if remaining is None:
         return 0.0
     try:

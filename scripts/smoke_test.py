@@ -41,11 +41,12 @@ def main() -> int:
     print(f"   ok, total ranked sets in osu!standard: {total}")
     print(f"   sets returned in this page: {len(sets)}")
 
-    remaining = headers.get("X-RateLimit-Remaining")
+    remaining = headers.get(osu_api.RATE_REMAINING_HEADER)
     if remaining is not None:
         print(f"   rate limit remaining: {remaining}")
     else:
-        print("   no X-RateLimit-Remaining header; cannot pace requests from it")
+        print("   no rate-limit header in the response; the collector falls back")
+        print("   to a fixed delay between pages instead of pacing off it")
 
     print("\n3. checking that the ranked filter was actually applied...")
     modes: set[str] = set()
