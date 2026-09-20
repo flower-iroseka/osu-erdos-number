@@ -3,7 +3,14 @@
   <head>
     <meta charset="UTF-8">
 
-{% seo %}
+    <!--
+      seo also wants to write the title, but it appends site.description to it
+      on the home page, and falls back to the repository description when there
+      is none. The tab should just say the site name, so the tag is suppressed
+      here and written below instead.
+    -->
+{% seo title=false %}
+    <title>{{ site.title }}</title>
     <link rel="preconnect" href="https://fonts.gstatic.com">
     <link rel="preload" href="https://fonts.googleapis.com/css?family=Open+Sans:400,700&display=swap" as="style" type="text/css" crossorigin>
     <meta name="viewport" content="width=device-width, initial-scale=1">
