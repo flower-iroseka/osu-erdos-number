@@ -427,10 +427,14 @@ html.is-loading body {
 
 // Black rather than the theme's grey, and its own space at the bottom of the
 // page rather than butting against the last thing above it.
+//
+// The theme draws a rule along the top edge of this box, so the margin is what
+// holds it away from the explain buttons -- padding would sit inside the rule
+// and leave it stuck to them.
 .site-footer {
   padding-top: 2.5rem;
   padding-bottom: 3rem;
-  margin-top: 0;
+  margin-top: 2.5rem;
   font-size: 0.85rem;
   color: #000;
 
