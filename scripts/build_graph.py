@@ -8,6 +8,10 @@ Each edge carries a mask of the game modes both mappers contributed to in that
 set. The site uses the whole graph, but the mask is what would allow filtering
 per mode later without collecting everything again.
 
+Each edge also carries the ids of the beatmapsets behind it, which the site shows
+when you click an arrow in a path. Those ids are only for display; the path
+search ignores them.
+
 Mappers who never worked with anyone are still kept as nodes. They have no
 edges, but the site has to be able to tell "this mapper has no ranked maps"
 apart from "this mapper has ranked maps but has never collaborated".
@@ -83,15 +87,17 @@ def pick_top(counts: list[Counter]) -> list[int | None]:
     return tops
 
 
-def build_edges(sets: dict) -> tuple[dict, list[int]]:
+def build_edges(sets: dict) -> tuple[dict, dict, list[int]]:
     """Link every pair of mappers who share a set.
 
-    Returns (edge masks keyed by ordered user id pair, contributors per set).
+    Returns (edge masks, the set ids behind each edge, contributors per set),
+    all keyed by ordered user id pair.
     """
     edges: dict[tuple[int, int], int] = {}
+    edge_sets: dict[tuple[int, int], list[int]] = {}
     contributors: list[int] = []
 
-    for _set_id, (_host, diffs) in sets.items():
+    for set_id, (_host, diffs) in sets.items():
         per_user = mode_masks(diffs)
         users = sorted(per_user)
         contributors.append(len(users))
@@ -103,8 +109,11 @@ def build_edges(sets: dict) -> tuple[dict, list[int]]:
                 shared = per_user[first] & per_user[second]
                 key = (first, second)
                 edges[key] = edges.get(key, 0) | shared
+                # Kept so the site can show which maps a pair worked on. Most
+                # pairs have exactly one.
+                edge_sets.setdefault(key, []).append(int(set_id))
 
-    return edges, contributors
+    return edges, edge_sets, contributors
 
 
 def resolve_usernames(
@@ -157,9 +166,21 @@ def resolve_usernames(
     return cache
 
 
-def report_diagnostics(sets: dict, edges: dict, contributors: list[int], masks: Counter) -> None:
+def report_diagnostics(
+    sets: dict,
+    edges: dict,
+    edge_sets: dict,
+    contributors: list[int],
+    masks: Counter,
+) -> None:
     """Print the numbers that would reveal the data not meaning what we assume."""
     print("\ndiagnostics")
+
+    repeat = Counter(len(ids) for ids in edge_sets.values())
+    print("  beatmapsets per collaborating pair:")
+    for count in sorted(repeat)[:6]:
+        print(f"    {count}: {repeat[count]} pairs")
+    print(f"    most by any pair: {max(repeat) if repeat else 0}")
 
     histogram = Counter(contributors)
     print("  contributors per beatmapset:")
@@ -253,8 +274,9 @@ def main() -> int:
         else:
             print(f"  {MODE_NAMES[mode]}: user {user_id} with {counts[mode][user_id]} sets")
 
-    edges, contributors = build_edges(sets)
-    print(f"built {len(edges)} unique collaborations")
+    edges, edge_sets, contributors = build_edges(sets)
+    incidences = sum(len(ids) for ids in edge_sets.values())
+    print(f"built {len(edges)} unique collaborations across {incidences} pair-set pairs")
 
     users = sorted(mode_masks_from_sets(sets))
     cache = resolve_usernames(users, args.user_cache, None if not args.fetch_usernames
@@ -272,11 +294,16 @@ def main() -> int:
     index_of = {uid: index for index, uid in enumerate(ordered)}
 
     masks = Counter(mask for mask in edges.values())
-    report_diagnostics(sets, edges, contributors, masks)
+    report_diagnostics(sets, edges, edge_sets, contributors, masks)
 
     flat_edges: list[int] = []
+    # One entry per edge, aligned with the triples above. A single id is stored
+    # bare, several as an array, which keeps the common case small.
+    flat_edge_sets: list[int | list[int]] = []
     for (first, second), mask in edges.items():
         flat_edges.extend((index_of[first], index_of[second], mask))
+        ids = sorted(edge_sets[(first, second)])
+        flat_edge_sets.append(ids[0] if len(ids) == 1 else ids)
 
     graph = {
         "generated": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -284,6 +311,7 @@ def main() -> int:
         "top": [index_of[uid] if uid is not None else -1 for uid in tops],
         "users": [[uid, cache.get(str(uid))] for uid in ordered],
         "edges": flat_edges,
+        "edge_sets": flat_edge_sets,
     }
 
     meta = {
