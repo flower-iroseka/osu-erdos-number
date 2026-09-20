@@ -298,6 +298,15 @@ html.is-loading body {
   color: #159957;
 }
 
+// The result is a green headline with two names in it. Left as ordinary links
+// they would chop the sentence into three colours, so they keep the headline's
+// colour and lean on the underline to say they are clickable.
+#result .mapper-link {
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-color: rgba(21, 153, 87, 0.45);
+}
+
 #status {
   min-height: 1.5em;
   font-size: 0.9rem;
