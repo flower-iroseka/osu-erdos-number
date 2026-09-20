@@ -1,0 +1,28 @@
+name: smoke test
+
+# Manual only, and deliberately so. This answers one question: can a GitHub
+# runner reach osu! through Cloudflare, and does an OAuth token actually make
+# the ranked filter apply? If it fails, the planned architecture needs rethinking,
+# so it runs before anything is built on top of it.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # No pip install: scripts/ only uses the standard library, on purpose.
+      - name: Fetch a token and one page of ranked beatmapsets
+        env:
+          OSU_CLIENT_ID: ${{ secrets.OSU_CLIENT_ID }}
+          OSU_CLIENT_SECRET: ${{ secrets.OSU_CLIENT_SECRET }}
+        run: python scripts/smoke_test.py

@@ -1,0 +1,17 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Build output from the fetch/build scripts. The scheduled Action writes these
+# to the data branch; they should never land in the site branch.
+out/
+data/
+
+# Jekyll
+_site/
+.jekyll-cache/
+.jekyll-metadata
+Gemfile.lock
+
+
