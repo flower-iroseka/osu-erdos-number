@@ -442,9 +442,11 @@
       els.note.textContent = "";
       return;
     }
+    // "participated in" rather than "hosted": the count includes sets the top
+    // mapper was only a guest on, and the subtitle above says the same thing.
     els.note.textContent =
       graph.names[index] +
-      " has hosted a total number of " +
+      " has participated in a total number of " +
       entry.sets +
       " ranked/approved mapsets.";
   }
