@@ -8,6 +8,21 @@
 // work on the header's green gradient.
 
 .page-header {
+  // The heading, the mapset count, the subtitle and the input sit together in
+  // the middle of the first screen. Everything below starts past the fold,
+  // which is why app.js scrolls the answer into view once there is one.
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: 100vh;
+  box-sizing: border-box;
+
+  @supports (min-height: 100svh) {
+    // On a phone 100vh is the height with the address bar hidden, so the block
+    // would sit slightly high on load.
+    min-height: 100svh;
+  }
+
   @include large {
     padding: 3rem 4rem;
   }
@@ -36,15 +51,21 @@
   line-height: 1.2;
 }
 
-// The aside next to the heading. Two lines at most, so it ends up about as
-// tall as the heading itself rather than dragging the row out.
+// The count of mapsets the top mapper took part in, on its own line under the
+// heading rather than beside it: next to the heading it competed with it.
 #top-note {
-  max-width: 21rem;
-  margin: 0;
+  max-width: 38rem;
+  margin: 0.5rem auto 0;
   font-size: 0.85rem;
   line-height: 1.5;
-  text-align: left;
+  text-align: center;
   opacity: 0.8;
+}
+
+// Empty until meta.json arrives, and empty again if the mode has no count, so
+// it must not take up a line of its own in those cases.
+#top-note:empty {
+  display: none;
 }
 
 .mode-picker {
@@ -273,11 +294,72 @@
   color: #819198;
 }
 
+.explain {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  // The column gap is what keeps the two paragraphs apart when both are open.
+  gap: 0 2.5rem;
+  align-items: start;
+  max-width: 52rem;
+  margin: 4rem auto 0;
+  text-align: left;
+
+  @include small {
+    grid-template-columns: 1fr;
+    gap: 2rem 0;
+  }
+}
+
+.explain-col {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+// Deliberately quiet: it should read as a button, not compete with the page.
+.explain-toggle {
+  padding: 0.35rem 0.9rem;
+  font: inherit;
+  font-size: 0.9rem;
+  color: #606c71;
+  background-color: #f6f8fa;
+  border: 1px solid #d5dde5;
+  border-radius: 0.3rem;
+  cursor: pointer;
+
+  &:hover {
+    background-color: #eef2f6;
+    border-color: #c3cfda;
+  }
+
+  &[aria-expanded="true"] {
+    background-color: #e9eff5;
+  }
+}
+
+.explain-text {
+  margin-top: 0.8rem;
+  font-size: 0.85rem;
+  line-height: 1.65;
+  color: #606c71;
+
+  p {
+    margin: 0 0 0.8rem;
+  }
+
+  p:last-child {
+    margin-bottom: 0;
+  }
+}
+
+// Black rather than the theme's grey, and its own space at the bottom of the
+// page rather than butting against the last thing above it.
 .site-footer {
-  padding-top: 1.5rem;
-  margin-top: 3rem;
-  font-size: 0.75rem;
-  opacity: 0.6;
+  padding-top: 2.5rem;
+  padding-bottom: 3rem;
+  margin-top: 0;
+  font-size: 0.85rem;
+  color: #000;
 }
 
 .site-footer-owner {

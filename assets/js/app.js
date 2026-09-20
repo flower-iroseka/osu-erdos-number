@@ -46,6 +46,13 @@
     status: document.getElementById("status")
   };
 
+  // The two explain buttons and the boxes they open, as [button, box] id pairs.
+  // Both boxes ship hidden in the markup; the buttons are the only way to them.
+  var EXPLAIN = [
+    ["explain-erdos", "explain-erdos-text"],
+    ["explain-why", "explain-why-text"]
+  ];
+
   var graph = {
     modes: [],
     mode: 0,
@@ -365,7 +372,16 @@
     return found ? found[0] : null;
   }
 
+  /* Run a query and then show the answer.
+   *
+   * The header fills the first screen, so whatever run() writes lands below the
+   * fold. Without the scroll it looks like the button did nothing. */
   function run(raw) {
+    answer(raw);
+    els.app.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+
+  function answer(raw) {
     var text = raw.trim();
     els.result.textContent = "";
     els.paths.textContent = "";
@@ -543,6 +559,22 @@
       if (event.key === "Escape") {
         closeMenu();
       }
+    });
+
+    // Both explain boxes open and close on their own. They are independent on
+    // purpose: the two sit in separate columns, so having both open at once is
+    // readable and there is no reason to force one shut.
+    EXPLAIN.forEach(function (pair) {
+      var button = document.getElementById(pair[0]);
+      var box = document.getElementById(pair[1]);
+      if (!button || !box) {
+        return;
+      }
+      button.addEventListener("click", function () {
+        var opening = box.hidden;
+        box.hidden = !opening;
+        button.setAttribute("aria-expanded", String(opening));
+      });
     });
   }
 
