@@ -116,6 +116,26 @@ def build_edges(sets: dict) -> tuple[dict, dict, list[int]]:
     return edges, edge_sets, contributors
 
 
+def parse_users(payload) -> list:
+    """Pull the user list out of a /users response.
+
+    The endpoint answers with an object wrapping the list, not a bare list.
+    Getting that wrong is quiet rather than loud: iterating the object hands
+    back its keys, and the failure only shows up a line later on ["id"].
+    """
+    if isinstance(payload, dict):
+        users = payload.get("users")
+        if isinstance(users, list):
+            return users
+
+    shape = (
+        f"an object with keys {sorted(payload)}"
+        if isinstance(payload, dict)
+        else f"a {type(payload).__name__}"
+    )
+    raise osu_api.OsuApiError(f"/users answered with {shape}, expected a users list")
+
+
 def resolve_usernames(
     user_ids: list[int],
     cache_path: Path,
@@ -136,8 +156,7 @@ def resolve_usernames(
         batch = missing[start:start + USER_BATCH]
         payload, headers = osu_api.api_get("users", token, params={"ids[]": batch})
 
-        # The endpoint answers with a bare list here, not an object.
-        for user in payload or []:
+        for user in parse_users(payload):
             cache[str(user["id"])] = user.get("username") or ""
 
         done = min(start + USER_BATCH, len(missing))

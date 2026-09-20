@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import sys
 
+import build_graph
 import fetch_beatsets
 import osu_api
 
@@ -114,10 +115,21 @@ def main() -> int:
     print("\n6. resolving a batch of usernames...")
     wanted = sorted({user_id for _host, diffs in collected.values() for _bid, user_id, _m in diffs})
     batch = wanted[:50]
-    users, _headers = osu_api.api_get("users", token, params={"ids[]": batch})
+    payload, _headers = osu_api.api_get("users", token, params={"ids[]": batch})
 
-    if not isinstance(users, list):
-        print(f"\nFAIL: /users answered with {type(users).__name__}, expected a list")
+    # Say what came back before parsing it, so a shape we did not expect is
+    # readable in the log rather than inferred from a TypeError.
+    if isinstance(payload, dict):
+        print(f"   payload is an object with keys: {sorted(payload)}")
+    else:
+        print(f"   payload is a {type(payload).__name__}")
+
+    # Parsed with the same function the graph builder uses, so this checks the
+    # real code path rather than a second copy of it that could drift.
+    try:
+        users = build_graph.parse_users(payload)
+    except osu_api.OsuApiError as error:
+        print(f"\nFAIL: {error}")
         return 1
 
     named = {str(user.get("id")): user.get("username") for user in users}
