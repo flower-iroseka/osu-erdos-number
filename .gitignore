@@ -8,6 +8,9 @@ venv/
 out/
 data/
 
+# Throwaway scratch for trying things out. Regenerated, never published.
+tests-*/
+
 # Jekyll
 _site/
 .jekyll-cache/

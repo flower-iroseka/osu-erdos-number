@@ -1,19 +1,25 @@
 name: update graph
 
-# Monthly, plus a fuller sweep every January and July.
+# Weekly, plus a fuller sweep every January and July.
 #
-# The monthly run stops as soon as it reaches a beatmapset it already has, so it
+# The weekly run stops as soon as it reaches a beatmapset it already has, so it
 # only picks up what has been ranked since last time -- a dozen or so requests.
 # That cannot see mapsets that were unranked, moved to the graveyard or deleted,
 # which is what the twice-a-year full run is for.
 #
+# The cron fires every week for good; the "whether this run is due" step below
+# is what drops the ones that are too soon once the schedule goes fortnightly.
+# A cron cannot change its own interval partway through, so the interval lives
+# in that step instead of here.
+#
 # GitHub disables scheduled workflows in repositories with no activity for 60
-# days. Committing to the data branch every month is that activity, so this
-# keeps itself alive and needs no separate keepalive job.
+# days. The "keep the schedule alive" step pushes a dated file to main every
+# run so that cannot happen; see the note there for why the data branch alone
+# is not trusted to count.
 
 on:
   schedule:
-    - cron: "23 4 3 * *"     # every month: incremental
+    - cron: "23 4 * * 1"     # every Monday: incremental
     - cron: "41 4 3 1,7 *"   # January and July: full
   workflow_dispatch:
     inputs:
@@ -100,7 +106,61 @@ jobs:
           echo "full=$full" >> "$GITHUB_OUTPUT"
           echo "full collection: $full"
 
+      # Weekly to begin with, fortnightly once the date below has passed. The
+      # cron keeps firing every week either way, and this is what turns the
+      # extra firings into a no-op -- a cron cannot change its own interval
+      # partway through.
+      #
+      # It measures from the stamp inside the published meta.json, so it needs
+      # no state of its own: if the store is ever lost, the next run just
+      # happens, which is the safe way to be wrong.
+      #
+      # A full run is always due. There are only two a year and they are the
+      # ones that clear out mapsets that stopped being ranked.
+      - name: Decide whether this run is due
+        id: due
+        env:
+          FULL: ${{ steps.mode.outputs.full }}
+          WEEKLY_UNTIL: "2027-09-26"
+          INTERVAL_DAYS: "14"
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, os
+          from datetime import datetime, timezone
+          from pathlib import Path
+
+          if os.environ["FULL"] == "true":
+              print("full collection, always due")
+              due = True
+          else:
+              stamp = None
+              previous = Path("data/meta.json")
+              if previous.is_file():
+                  stamp = json.loads(previous.read_text(encoding="utf-8")).get("generated")
+
+              now = datetime.now(timezone.utc)
+              cutover = datetime.fromisoformat(os.environ["WEEKLY_UNTIL"]).replace(tzinfo=timezone.utc)
+
+              if stamp is None:
+                  print("nothing published yet, running")
+                  due = True
+              elif now < cutover:
+                  print(f"still weekly until {cutover.date()}, running")
+                  due = True
+              else:
+                  age = (now - datetime.fromisoformat(stamp.replace("Z", "+00:00"))).days
+                  interval = int(os.environ["INTERVAL_DAYS"])
+                  due = age >= interval
+                  print(f"fortnightly since {cutover.date()}: last build was {age} days ago, "
+                        f"{'running' if due else f'not due for another {interval - age}'}")
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
+              out.write(f"due={'true' if due else 'false'}\n")
+          PY
+
       - name: Collect from the osu! API
+        if: steps.due.outputs.due == 'true'
         env:
           FULL: ${{ steps.mode.outputs.full }}
         run: |
@@ -112,6 +172,7 @@ jobs:
           fi
 
       - name: Build the graph
+        if: steps.due.outputs.due == 'true'
         run: |
           set -euo pipefail
           python scripts/build_graph.py \
@@ -122,6 +183,7 @@ jobs:
 
       # Printed before the push so the numbers survive a failed publish.
       - name: Report sizes
+        if: steps.due.outputs.due == 'true'
         run: |
           set -euo pipefail
           python - <<'PY'
@@ -144,6 +206,7 @@ jobs:
       # would succeed, the site would keep working, and the only sign would be
       # numbers that are wrong. This is the one place that can notice.
       - name: Check the build against the last one
+        if: steps.due.outputs.due == 'true'
         run: |
           set -euo pipefail
           python - <<'PY'
@@ -192,6 +255,7 @@ jobs:
           PY
 
       - uses: actions/upload-artifact@v7
+        if: steps.due.outputs.due == 'true'
         with:
           name: graph
           path: |
@@ -207,6 +271,7 @@ jobs:
       #
       # users.csv rides along for reading by hand. Nothing loads it at runtime.
       - name: Publish to the data branch
+        if: steps.due.outputs.due == 'true'
         run: |
           set -euo pipefail
           stage="$(mktemp -d)"
@@ -231,3 +296,38 @@ jobs:
             HEAD:data
 
           echo "published $(git rev-parse --short HEAD) to the data branch"
+
+      # GitHub disables a scheduled workflow once the repository has gone 60
+      # days without activity, and it does not say whether commits to a
+      # non-default branch count -- the data branch push above may or may not
+      # be enough to hold it off. Every run also commits a dated file to main,
+      # which counts under either reading. It costs one tiny commit, and the
+      # alternative is the schedule going quiet with nothing to notice it.
+      #
+      # This runs after the publish on purpose: if it fails, the data is
+      # already out and the red job is a nudge rather than a lost update.
+      - name: Keep the schedule alive
+        if: steps.due.outputs.due == 'true'
+        run: |
+          set -euo pipefail
+          mkdir -p .github
+          printf '%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > .github/last-updated.txt
+          git add .github/last-updated.txt
+          git -c user.name="github-actions[bot]" \
+              -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+              commit -q -m "Note the data update ($(date -u +%Y-%m-%d))"
+
+          # Somebody may have pushed to main while this ran, so the first push
+          # can be rejected. Rebase onto whatever is there and try again.
+          for attempt in 1 2 3; do
+            if git push --quiet origin HEAD:main; then
+              echo "pushed $(git rev-parse --short HEAD) to main on attempt $attempt"
+              exit 0
+            fi
+            echo "push rejected on attempt $attempt, rebasing onto the latest main"
+            git fetch --quiet --depth=1 origin main
+            git rebase --quiet FETCH_HEAD || { git rebase --abort; exit 1; }
+          done
+
+          echo "could not push the keepalive commit after three attempts" >&2
+          exit 1
